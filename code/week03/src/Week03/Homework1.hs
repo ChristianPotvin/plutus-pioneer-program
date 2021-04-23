@@ -43,7 +43,20 @@ PlutusTx.unstableMakeIsData ''VestingDatum
 -- This should validate if either beneficiary1 has signed the transaction and the current slot is before or at the deadline
 -- or if beneficiary2 has signed the transaction and the deadline has passed.
 mkValidator :: VestingDatum -> () -> ScriptContext -> Bool
-mkValidator _ _ _ = False -- FIX ME!
+mkValidator dat () ctx =
+    (traceIfFalse "beneficiary #1 signature missing"      (checkSig (beneficiary1 dat))           &&
+     traceIfFalse "beneficiary #1 deadline not reached"   (checkDeadline (to (deadline dat))))    ||
+    (traceIfFalse "beneficiary #2 signature missing"      (checkSig (beneficiary2 dat))           &&
+     traceIfFalse "beneficiary #2 deadline not reached"   (checkDeadline (from (deadline dat))))
+  where
+    info :: TxInfo
+    info = scriptContextTxInfo ctx
+
+    checkSig :: PubKeyHash -> Bool
+    checkSig pkh = pkh `elem` txInfoSignatories info
+
+    checkDeadline :: Interval Slot -> Bool
+    checkDeadline interval = interval `contains` txInfoValidRange info
 
 data Vesting
 instance Scripts.ScriptType Vesting where
