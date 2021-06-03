@@ -42,19 +42,29 @@ import qualified Week06.Oracle.Core                  as Oracle
 import           Week06.Oracle.PAB                   (OracleContracts (..))
 import qualified Week06.Oracle.Swap                  as Oracle
 
+--- CID is ContractInstanceID ---
+
 main :: IO ()
+-- Simulator monad, very similar to the emulator monad... (plan is to allign them and combine them into one...)
+-- One difference is you can't do IO in emulator monad.
 main = void $ Simulator.runSimulationWith handlers $ do
     Simulator.logString @(Builtin OracleContracts) "Starting Oracle PAB webserver. Press enter to exit."
     shutdown <- PAB.Server.startServerDebug
 
     cidInit <- Simulator.activateContract (Wallet 1) Init
+    -- Below line blocks until the Init is complete...
     cs      <- waitForLast cidInit
     _       <- Simulator.waitUntilFinished cidInit
 
+    -- Gets handle to the oracle contract
     cidOracle <- Simulator.activateContract (Wallet 1) $ Oracle cs
+    -- liftIO is used to move IO into the simulator monad...
+    -- In this case, writes the handle to a file.
     liftIO $ writeFile "oracle.cid" $ show $ unContractInstanceId cidOracle
+    -- Blocks until NFT is minted and know what the oracle value is.
     oracle <- waitForLast cidOracle
 
+    -- cids for the swap contracts for all wallets (except 1)
     forM_ wallets $ \w ->
         when (w /= Wallet 1) $ do
             cid <- Simulator.activateContract w $ Swap oracle
@@ -63,6 +73,7 @@ main = void $ Simulator.runSimulationWith handlers $ do
     void $ liftIO getLine
     shutdown
 
+-- This helper function blocks until it gets not a Nothing... (unclear on the details...)
 waitForLast :: FromJSON a => ContractInstanceId -> Simulator.Simulation t a
 waitForLast cid =
     flip Simulator.waitForState cid $ \json -> case fromJSON json of
@@ -88,6 +99,7 @@ handleOracleContracts ::
     )
     => ContractEffect (Builtin OracleContracts)
     ~> Eff effs
+    -- Boiler plate mapping to schemas and contracts.
 handleOracleContracts = handleBuiltin getSchema getContract where
     getSchema = \case
         Init     -> endpointsToSchemas @Empty
@@ -103,6 +115,7 @@ handlers =
     Simulator.mkSimulatorHandlers @(Builtin OracleContracts) []
     $ interpret handleOracleContracts
 
+-- Generates the initial funds (for demo purposes)
 initContract :: Contract (Last CurrencySymbol) BlockchainActions Text ()
 initContract = do
     ownPK <- pubKeyHash <$> ownPubKey

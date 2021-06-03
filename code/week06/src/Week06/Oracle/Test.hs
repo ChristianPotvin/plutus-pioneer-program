@@ -1,3 +1,6 @@
+-- Example 4
+-- (Tests the contracts written using the emulator trace monad)
+
 {-# LANGUAGE DataKinds             #-}
 {-# LANGUAGE DeriveAnyClass        #-}
 {-# LANGUAGE DeriveGeneric         #-}
@@ -40,6 +43,9 @@ assetToken :: TokenName
 assetToken = "USDT"
 
 test :: IO ()
+-- Using fine grain version of the runEmulatorTraceIO (specififies different defaults)
+-- First option is def (for default)
+-- Second option is emulator config, allows for setting up initial distribution.
 test = runEmulatorTraceIO' def emCfg myTrace
   where
     emCfg :: EmulatorConfig
@@ -49,6 +55,7 @@ test = runEmulatorTraceIO' def emCfg myTrace
     v = Ada.lovelaceValueOf                    100_000_000 <>
         Value.singleton assetSymbol assetToken 100_000_000
 
+-- Keeps checking the oracle value and logs it
 checkOracle :: Oracle -> Contract () BlockchainActions Text a
 checkOracle oracle = do
     m <- findOracle oracle
@@ -57,6 +64,7 @@ checkOracle oracle = do
         Just (_, _, x) -> Contract.logInfo $ "Oracle value: " ++ show x
     Contract.waitNSlots 1 >> checkOracle oracle
 
+-- Trace definition.
 myTrace :: EmulatorTrace ()
 myTrace = do
     let op = OracleParams
@@ -103,6 +111,7 @@ myTrace = do
     callEndpoint @"retrieve" h4 ()
     void $ Emulator.waitNSlots 3
   where
+    -- Finds the oracle.
     getOracle :: ContractHandle (Last Oracle) OracleSchema Text -> EmulatorTrace Oracle
     getOracle h = do
         l <- observableState h
