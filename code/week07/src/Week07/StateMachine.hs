@@ -60,6 +60,7 @@ instance Eq GameChoice where
 
 PlutusTx.unstableMakeIsData ''GameChoice
 
+-- Slight change, added Finished, which represents final state of the state machine (needed to make it work)
 data GameDatum = GameDatum ByteString (Maybe GameChoice) | Finished
     deriving Show
 
@@ -88,9 +89,11 @@ gameDatum o f = do
     PlutusTx.fromData d
 
 {-# INLINABLE transition #-}
+-- State GameDatum (is pair consisting of Datum and Value)
 transition :: Game -> State GameDatum -> GameRedeemer -> Maybe (TxConstraints Void Void, State GameDatum)
 transition game s r = case (stateValue s, stateData s, r) of
     (v, GameDatum bs Nothing, Play c)
+        -- Check for stake of the game                
         | lovelaces v == gStake game         -> Just ( Constraints.mustBeSignedBy (gSecond game)                    <>
                                                        Constraints.mustValidateIn (to $ gPlayDeadline game)
                                                      , State (GameDatum bs $ Just c) (lovelaceValueOf $ 2 * gStake game)
@@ -167,6 +170,7 @@ gameValidator = Scripts.validatorScript . gameInst
 gameAddress :: Game -> Ledger.Address
 gameAddress = scriptAddress . gameValidator
 
+-- State machine client (needed to interact with state machine from wallet contractj)
 gameClient :: Game -> StateMachineClient GameDatum GameRedeemer
 gameClient game = mkStateMachineClient $ StateMachineInstance (gameStateMachine' game) (gameInst game)
 
@@ -181,6 +185,7 @@ data FirstParams = FirstParams
     , fpChoice         :: !GameChoice
     } deriving (Show, Generic, FromJSON, ToJSON, ToSchema)
 
+-- StateMachine has a specific error state ... Below changes it into Text errors.
 mapError' :: Contract w s SMContractError a -> Contract w s Text a
 mapError' = mapError $ pack . show
 
@@ -199,23 +204,29 @@ firstGame fp = do
         v      = lovelaceValueOf (fpStake fp)
         c      = fpChoice fp
         bs     = sha2_256 $ fpNonce fp `concatenate` if c == Zero then bsZero else bsOne
+    -- Setup of the state machine
     void $ mapError' $ runInitialise client (GameDatum bs Nothing) v
     logInfo @String $ "made first move: " ++ show (fpChoice fp)
 
+    -- Waiting for the move
     void $ awaitSlot $ 1 + fpPlayDeadline fp
 
+    -- Uses getOnChainState using the client.
     m <- mapError' $ getOnChainState client
     case m of
         Nothing             -> throwError "game output not found"
+        -- Extracts Datum
         Just ((o, _), _) -> case tyTxOutData o of
 
             GameDatum _ Nothing -> do
                 logInfo @String "second player did not play"
+                -- Creates a transaction and submits it that will move along the state machine.
                 void $ mapError' $ runStep client ClaimFirst
                 logInfo @String "first player reclaimed stake"
 
             GameDatum _ (Just c') | c' == c -> do
                 logInfo @String "second player played and lost"
+                -- Creates a transaction and submits it that will move along the state machine.
                 void $ mapError' $ runStep client $ Reveal $ fpNonce fp
                 logInfo @String "first player revealed and won"
 

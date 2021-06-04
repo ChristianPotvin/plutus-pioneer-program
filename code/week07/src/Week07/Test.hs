@@ -34,11 +34,15 @@ test = do
     test' One Zero
     test' One One
 
+-- Run a simulated game where player makes one choice, and other makes other choice.
 test' :: GameChoice -> GameChoice -> IO ()
+-- Specify an initial distribution
 test' c1 c2 = runEmulatorTraceIO' def emCfg $ myTrace c1 c2
   where
     emCfg :: EmulatorConfig
     emCfg = EmulatorConfig $ Left $ Map.fromList
+        -- Giving the NFT to the first player.
+        -- (Under normal circumstances would have to forget the NFT)
         [ (Wallet 1, v <> assetClassValue (AssetClass (gameTokenCurrency, gameTokenName)) 1)
         , (Wallet 2, v)
         ]
